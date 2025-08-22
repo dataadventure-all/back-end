@@ -5,11 +5,12 @@ from fastapi.responses import JSONResponse
 from contextlib import asynccontextmanager
 import time
 from .api.routes import router
+from .api.health_routes import router as health_router
 from .core.config import get_settings
 from .utils.logger import setup_logging, get_logger
 from .core.database import engine
-import sentry_sdk
-from sentry_sdk.integrations.asgi import SentryAsgiMiddleware
+# import sentry_sdk
+# from sentry_sdk.integrations.asgi import SentryAsgiMiddleware
 
 settings = get_settings()
 logger = get_logger(__name__)
@@ -44,13 +45,13 @@ app = FastAPI(
 setup_logging(settings.LOG_LEVEL)
 
 # Setup Sentry (if configured)
-if settings.SENTRY_DSN:
-    sentry_sdk.init(
-        dsn=settings.SENTRY_DSN,
-        environment="production" if settings.is_production else "development",
-        traces_sample_rate=0.1,
-    )
-    app.add_middleware(SentryAsgiMiddleware)
+# if settings.SENTRY_DSN:
+#     sentry_sdk.init(
+#         dsn=settings.SENTRY_DSN,
+#         environment="production" if settings.is_production else "development",
+#         traces_sample_rate=0.1,
+#     )
+#     app.add_middleware(SentryAsgiMiddleware)
 
 # CORS middleware
 app.add_middleware(
@@ -87,6 +88,7 @@ async def global_exception_handler(request: Request, exc: Exception):
 
 # Include routers
 app.include_router(router)
+app.include_router(health_router) 
 
 # Root endpoint
 @app.get("/")

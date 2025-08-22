@@ -48,7 +48,7 @@ async def test_complete_health_check(health_service):
 async def test_connection_with_invalid_database():
     """Test with invalid database URL"""
     with patch('app.core.config.get_settings') as mock_settings:
-        mock_settings.return_value.DATABASE_URL = "postgresql://invalid:invalid@localhost:5432/invalid"
+        mock_settings.return_value.DATABASE_URL = "postgresql://postgres.untcwweootmwfrtmwwai:data_adventure123@aws-1-ap-southeast-1.pooler.supabase.com:6543/postgres"
         
         health_service = HealthCheckService()
         result = await health_service.check_database()

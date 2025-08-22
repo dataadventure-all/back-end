@@ -17,8 +17,8 @@ class Settings(BaseSettings):
     
     # Database
     DATABASE_URL: str
-    SUPABASE_URL: Optional[str] = None
-    SUPABASE_KEY: Optional[str] = None
+    SUPABASE_URL: str
+    SUPABASE_KEY: str
     DB_POOL_SIZE: int = 20
     DB_MAX_OVERFLOW: int = 40
     

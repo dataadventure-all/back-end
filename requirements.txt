@@ -1,0 +1,33 @@
+# Web framework
+fastapi
+uvicorn[standard]
+
+# Database
+psycopg2-binary
+sqlalchemy
+databases
+supabase
+
+# LLM & AI
+langchain
+openai
+groq
+langchain-community
+tiktoken
+
+# Environment & Settings
+pydantic-settings
+python-dotenv
+
+# Caching / Queue
+redis
+aioredis
+
+# Monitoring / Logging
+sentry-sdk
+
+# Optional utilities
+httpx
+python-multipart
+
+asyncpg

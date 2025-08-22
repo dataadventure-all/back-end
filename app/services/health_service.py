@@ -103,8 +103,46 @@ class HealthCheckService:
                 "connection_string": self._mask_connection_string(settings.DATABASE_URL)
             }
     
+    # async def check_supabase(self) -> Dict[str, Any]:
+    #     """Check Supabase connection"""
+    #     if not settings.SUPABASE_URL or not settings.SUPABASE_KEY:
+    #         return {
+    #             "healthy": False,
+    #             "error": "Supabase not configured",
+    #             "configured": False
+    #         }
+        
+    #     try:
+    #         start = datetime.now()
+            
+    #         # Initialize Supabase client
+    #         supabase: Client = create_client(
+    #             settings.SUPABASE_URL,
+    #             settings.SUPABASE_KEY
+    #         )
+            
+    #         # Test query - get tables
+    #         response = supabase.table("tabbranch").select("*").limit(1).execute()
+            
+    #         response_time = (datetime.now() - start).total_seconds() * 1000
+            
+    #         return {
+    #             "healthy": True,
+    #             "response_time_ms": response_time,
+    #             "url": settings.SUPABASE_URL,
+    #             "configured": True
+    #         }
+            
+    #     except Exception as e:
+    #         logger.error(f"Supabase health check failed: {str(e)}")
+    #         return {
+    #             "healthy": False,
+    #             "error": str(e),
+    #             "configured": True
+    #         }
+
     async def check_supabase(self) -> Dict[str, Any]:
-        """Check Supabase connection"""
+        """Check Supabase Connection"""
         if not settings.SUPABASE_URL or not settings.SUPABASE_KEY:
             return {
                 "healthy": False,
@@ -115,26 +153,17 @@ class HealthCheckService:
         try:
             start = datetime.now()
             
-            # Initialize Supabase client
-            supabase: Client = create_client(
-                settings.SUPABASE_URL,
-                settings.SUPABASE_KEY
-            )
-            
-            # Test query - get tables
-            response = supabase.table('sales').select("*").limit(1).execute()
+            supabase = create_client(settings.SUPABASE_URL, settings.SUPABASE_KEY)
             
             response_time = (datetime.now() - start).total_seconds() * 1000
             
             return {
                 "healthy": True,
                 "response_time_ms": response_time,
-                "url": settings.SUPABASE_URL,
                 "configured": True
             }
             
         except Exception as e:
-            logger.error(f"Supabase health check failed: {str(e)}")
             return {
                 "healthy": False,
                 "error": str(e),

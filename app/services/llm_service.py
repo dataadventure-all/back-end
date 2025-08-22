@@ -1,6 +1,7 @@
 from typing import Dict, Any, Optional, List
 from langchain_groq import ChatGroq
-from langchain_openai import ChatOpenAI
+# from langchain_openai import ChatOpenAI
+from langchain.chat_models import ChatOpenAI
 from langchain.prompts import PromptTemplate
 from langchain.schema import BaseMessage, HumanMessage, SystemMessage
 import tiktoken

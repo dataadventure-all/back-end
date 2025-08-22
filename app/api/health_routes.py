@@ -21,6 +21,7 @@ async def database_health():
     """Check only database health"""
     health_service = HealthCheckService()
     return await health_service.check_database()
+    
 
 @router.get("/llm")
 async def llm_health():
