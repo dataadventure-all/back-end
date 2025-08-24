@@ -16,6 +16,7 @@ class LLMProvider(str, Enum):
     OPENAI = "openai"
     ANTHROPIC = "anthropic"
     LOCAL = "local"
+    DEEPSEEK = "deepseek"
 
 class QueryStatus(str, Enum):
     PENDING = "pending"

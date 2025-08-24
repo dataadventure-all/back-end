@@ -38,6 +38,13 @@ class LLMService:
                 temperature=0,
                 max_tokens=settings.MAX_RESPONSE_TOKENS
             )
+        elif self.provider == LLMProvider.DEEPSEEK:
+            return ChatOpenAI(
+                openai_api_key=settings.DEEPSEEK_API_KEY,
+                model="deepseek/deepseek-r1-0528-qwen3-8b:free",
+                temperature=0,
+                max_tokens=settings.MAX_RESPONSE_TOKENS
+            )
         else:
             raise ValueError(f"Unsupported provider: {self.provider}")
     

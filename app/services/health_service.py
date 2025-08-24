@@ -156,6 +156,8 @@ class HealthCheckService:
                 result = await self._test_groq()
             elif settings.LLM_PROVIDER == "openai":
                 result = await self._test_openai()
+            elif settings.LLM_PROVIDER == "deepseek":
+                result = await self._test_deepseek()
             else:
                 result = {"error": f"Unknown provider: {settings.LLM_PROVIDER}"}
             
@@ -181,6 +183,72 @@ class HealthCheckService:
                 "provider": settings.LLM_PROVIDER,
                 "error": str(e),
                 "api_key_configured": bool(self._get_api_key())
+            }
+        
+    async def _test_deepseek(self) -> Dict[str, Any]:
+        """Test DeepSeek via OpenRouter API"""
+        try:
+            # Untuk deepseek, kita gunakan  sebagai OpenRouter key
+            api_key = settings.DEEPSEEK_API_KEY
+            if not api_key:
+                return {
+                    "success": False,
+                    "error": "DEEPSEEK_API_KEY (OpenRouter) not configured"
+                }
+                
+            logger.info("Making request to OpenRouter for DeepSeek...")
+            
+            async with httpx.AsyncClient() as client:
+                response = await client.post(
+                    "https://openrouter.ai/api/v1/chat/completions",
+                    headers={
+                        "Authorization": f"Bearer {api_key}",
+                        "Content-Type": "application/json",
+                        "HTTP-Referer": "http://localhost:8000",
+                        "X-Title": "AI Dashboard Health Check"
+                    },
+                    json={
+                        "model": "deepseek/deepseek-r1-0528-qwen3-8b:free",
+                        "messages": [
+                            {"role": "user", "content": "Say 'OK'"}
+                        ],            
+                        "max_tokens": 10,
+                        "temperature": 0
+                    },
+                    timeout=30.0
+                )
+                
+                logger.info(f"OpenRouter response status: {response.status_code}")
+                
+                if response.status_code == 200:
+                    data = response.json()
+                    logger.info(f"OpenRouter response data: {data}")
+                    return {
+                        "success": True,
+                        "model": data.get("model", "deepseek-r1"),
+                        "usage": data.get("usage", {}),
+                        "response_content": data.get("choices", [{}])[0].get("message", {}).get("content", "")
+                    }
+                else:
+                    error_text = response.text[:200] if response.text else "No error details"
+                    logger.error(f"OpenRouter API error: {response.status_code} - {error_text}")
+                    return {
+                        "success": False,
+                        "error": f"OpenRouter API returned {response.status_code}",
+                        "details": error_text
+                    }
+                    
+        except httpx.TimeoutException:
+            logger.error("OpenRouter request timeout")
+            return {
+                "success": False,
+                "error": "Request timeout (30s)"
+            }
+        except Exception as e:
+            logger.error(f"OpenRouter connection error: {str(e)}", exc_info=True)
+            return {
+                "success": False,
+                "error": f"Connection error: {str(e)}"
             }
     
     async def _test_groq(self) -> Dict[str, Any]:
@@ -315,4 +383,6 @@ class HealthCheckService:
             return settings.GROQ_API_KEY
         elif settings.LLM_PROVIDER == "openai":
             return settings.OPENAI_API_KEY
+        elif settings.LLM_PROVIDER == "deepseek":
+            return settings.DEEPSEEK_API_KEY
         return None
