@@ -23,7 +23,7 @@ class Settings(BaseSettings):
     DB_MAX_OVERFLOW: int = 40
     
     # LLM Configuration
-    LLM_PROVIDER: str = "groq"  # groq, openai, anthropic
+    LLM_PROVIDER: str = "deepseek"  
     GROQ_API_KEY: Optional[str] = None
     OPENAI_API_KEY: Optional[str] = None
     ANTHROPIC_API_KEY: Optional[str] = None

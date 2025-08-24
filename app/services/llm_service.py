@@ -10,36 +10,134 @@ from ..models.schemas import TokenUsage
 from ..models.enums import LLMProvider
 from ..utils.logger import get_logger
 import json
+import httpx
+import asyncio
 
 logger = get_logger(__name__)
 settings = get_settings()
+
+class CustomDeepSeekChat:
+    """Custom DeepSeek chat implementation via OpenRouter"""
+    
+    def __init__(self, api_key: str, model: str = "deepseek/deepseek-r1-0528-qwen3-8b:free"):
+        self.api_key = api_key
+        self.model = model
+        self.base_url = "https://openrouter.ai/api/v1/chat/completions"
+    
+    async def ainvoke(self, messages: List[BaseMessage]) -> Any:
+        """Invoke DeepSeek via OpenRouter API"""
+        
+        # Convert LangChain messages to OpenAI format
+        formatted_messages = []
+        for msg in messages:
+            if isinstance(msg, SystemMessage):
+                formatted_messages.append({"role": "system", "content": msg.content})
+            elif isinstance(msg, HumanMessage):
+                formatted_messages.append({"role": "user", "content": msg.content})
+        
+        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                self.base_url,
+                headers={
+                    "Authorization": f"Bearer {self.api_key}",
+                    "Content-Type": "application/json",
+                    "HTTP-Referer": "http://localhost:8000",
+                    "X-Title": "AI Dashboard"
+                },
+                json={
+                    "model": self.model,
+                    "messages": formatted_messages,
+                    "max_tokens": settings.MAX_RESPONSE_TOKENS,
+                    "temperature": 0
+                },
+                timeout=30.0
+            )
+            
+            if response.status_code != 200:
+                raise Exception(f"DeepSeek API error: {response.status_code} - {response.text}")
+            
+            data = response.json()
+            
+            # Return response in LangChain-compatible format
+            class MockResponse:
+                def __init__(self, content):
+                    self.content = content
+            
+            return MockResponse(data["choices"][0]["message"]["content"])
 
 class LLMService:
     """Unified LLM service for multiple providers"""
     
     def __init__(self, provider: Optional[LLMProvider] = None):
-        self.provider = provider or LLMProvider(settings.LLM_PROVIDER)
+        # Fix: Handle string to enum conversion safely
+        if provider:
+            self.provider = provider
+        else:
+            provider_str = settings.LLM_PROVIDER.lower().strip()
+            try:
+                if provider_str == "groq":
+                    self.provider = LLMProvider.GROQ
+                elif provider_str == "openai":
+                    self.provider = LLMProvider.OPENAI
+                elif provider_str == "anthropic":
+                    self.provider = LLMProvider.ANTHROPIC
+                elif provider_str == "deepseek":
+                    self.provider = LLMProvider.DEEPSEEK
+                elif provider_str == "local":
+                    self.provider = LLMProvider.LOCAL
+                else:
+                    logger.warning(f"Unknown provider '{provider_str}', defaulting to GROQ")
+                    self.provider = LLMProvider.GROQ
+            except Exception as e:
+                logger.error(f"Error setting provider: {str(e)}, defaulting to GROQ")
+                self.provider = LLMProvider.GROQ
+        
+        logger.info(f"Initializing LLM service with provider: {self.provider}")
         self.llm = self._initialize_llm()
         self.tokenizer = tiktoken.get_encoding("cl100k_base")
         
     def _initialize_llm(self):
         """Initialize LLM based on provider"""
-        if self.provider == LLMProvider.GROQ:
-            return ChatGroq(
-                groq_api_key=settings.GROQ_API_KEY,
-                model_name="mixtral-8x7b-32768",
-                temperature=0,
-                max_tokens=settings.MAX_RESPONSE_TOKENS
-            )
-        elif self.provider == LLMProvider.OPENAI:
-            return ChatOpenAI(
-                openai_api_key=settings.OPENAI_API_KEY,
-                model="gpt-4-turbo-preview",
-                temperature=0,
-                max_tokens=settings.MAX_RESPONSE_TOKENS
-            )
-        else:
-            raise ValueError(f"Unsupported provider: {self.provider}")
+        try:
+            if self.provider == LLMProvider.GROQ:
+                logger.info("Initializing Groq LLM")
+                return ChatGroq(
+                    groq_api_key=settings.GROQ_API_KEY,
+                    model_name="mixtral-8x7b-32768",
+                    temperature=0,
+                    max_tokens=settings.MAX_RESPONSE_TOKENS
+                )
+            elif self.provider == LLMProvider.OPENAI:
+                logger.info("Initializing OpenAI LLM")
+                return ChatOpenAI(
+                    openai_api_key=settings.OPENAI_API_KEY,
+                    model="gpt-4-turbo-preview",
+                    temperature=0,
+                    max_tokens=settings.MAX_RESPONSE_TOKENS
+                )
+            elif self.provider == LLMProvider.DEEPSEEK:
+                logger.info("Initializing DeepSeek LLM via OpenRouter")
+                if not settings.ANTHROPIC_API_KEY:
+                    raise ValueError("ANTHROPIC_API_KEY (OpenRouter) required for DeepSeek")
+                return CustomDeepSeekChat(
+                    api_key=settings.ANTHROPIC_API_KEY,
+                    model="deepseek/deepseek-r1-0528-qwen3-8b:free"
+                )
+            elif self.provider == LLMProvider.ANTHROPIC:
+                # TODO: Implement Anthropic Claude
+                logger.warning("Anthropic provider not implemented yet, falling back to Groq")
+                self.provider = LLMProvider.GROQ
+                return self._initialize_llm()
+            elif self.provider == LLMProvider.LOCAL:
+                # TODO: Implement local model
+                logger.warning("Local provider not implemented yet, falling back to Groq")
+                self.provider = LLMProvider.GROQ
+                return self._initialize_llm()
+            else:
+                raise ValueError(f"Unsupported provider: {self.provider}")
+        except Exception as e:
+            logger.error(f"Failed to initialize {self.provider}: {str(e)}")
+            raise
     
     def count_tokens(self, text: str) -> int:
         """Count tokens in text"""
@@ -70,6 +168,7 @@ class LLMService:
         ]
         
         try:
+            logger.info(f"Generating SQL with {self.provider}")
             response = await self.llm.ainvoke(messages)
             sql_query = self._extract_sql_from_response(response.content)
             
@@ -82,6 +181,7 @@ class LLMService:
                 estimated_cost=self._calculate_cost(prompt_tokens, completion_tokens)
             )
             
+            logger.info(f"SQL generated successfully, tokens: {token_usage.total_tokens}")
             return sql_query, token_usage
             
         except Exception as e:
@@ -114,19 +214,23 @@ class LLMService:
         """
         
         messages = [HumanMessage(content=prompt)]
-        response = await self.llm.ainvoke(messages)
         
         try:
+            response = await self.llm.ainvoke(messages)
             config = json.loads(response.content)
             return config
         except json.JSONDecodeError:
             # Fallback config
+            logger.warning("Failed to parse chart config JSON, using fallback")
             return {
                 "chart_type": "bar",
                 "x_axis": list(data[0].keys())[0],
                 "y_axis": list(data[0].keys())[1] if len(data[0].keys()) > 1 else list(data[0].keys())[0],
                 "title": "Data Visualization"
             }
+        except Exception as e:
+            logger.error(f"Chart config generation failed: {str(e)}")
+            raise
     
     def _build_sql_system_prompt(
         self, 
@@ -173,12 +277,18 @@ class LLMService:
     
     def _calculate_cost(self, prompt_tokens: int, completion_tokens: int) -> float:
         """Calculate estimated cost based on provider"""
-        # Groq is free, OpenAI has pricing
         if self.provider == LLMProvider.GROQ:
-            return 0.0
+            return 0.0  # Groq is free
         elif self.provider == LLMProvider.OPENAI:
             # GPT-4 Turbo pricing (example)
             prompt_cost = (prompt_tokens / 1000) * 0.01
             completion_cost = (completion_tokens / 1000) * 0.03
             return prompt_cost + completion_cost
-        return 0.0
+        elif self.provider == LLMProvider.DEEPSEEK:
+            return 0.0  # Free tier via OpenRouter
+        elif self.provider == LLMProvider.ANTHROPIC:
+            # Claude pricing (example)
+            prompt_cost = (prompt_tokens / 1000) * 0.008
+            completion_cost = (completion_tokens / 1000) * 0.024
+            return prompt_cost + completion_cost
+        return 0.0  
