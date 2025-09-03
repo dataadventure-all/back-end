@@ -1,6 +1,6 @@
 from typing import Dict, Any, Optional, List
 from langchain_groq import ChatGroq
-# from langchain_openai import ChatOpenAI
+from langchain_openai import ChatOpenAI
 from langchain.chat_models import ChatOpenAI
 from langchain.prompts import PromptTemplate
 from langchain.schema import BaseMessage, HumanMessage, SystemMessage
@@ -40,10 +40,15 @@ class LLMService:
             )
         elif self.provider == LLMProvider.DEEPSEEK:
             return ChatOpenAI(
-                openai_api_key=settings.DEEPSEEK_API_KEY,
-                model="deepseek/deepseek-r1-0528-qwen3-8b:free",
-                temperature=0,
-                max_tokens=settings.MAX_RESPONSE_TOKENS
+            base_url="https://openrouter.ai/api/v1",
+            api_key=settings.OPENROUTER_API_KEY,
+            model="deepseek/deepseek-r1:free",
+            temperature=0,
+            max_tokens=settings.MAX_RESPONSE_TOKENS,
+            default_headers={
+                "HTTP-Referer": "http://localhost:8000",
+                "X-Title": "AI Dashboard"
+            }
             )
         else:
             raise ValueError(f"Unsupported provider: {self.provider}")
@@ -148,12 +153,18 @@ class LLMService:
         {json.dumps(schema, indent=2)}
         
         Rules:
-        1. Use only existing tables and columns
-        2. Always add LIMIT 100 to prevent large results
-        3. Use proper JOIN conditions
-        4. Prefer explicit column names over SELECT *
-        5. Add appropriate WHERE clauses for filtering
-        6. Use aggregation functions when needed
+        1. All table and column names must be lowercase.
+        2. Do not replace spaces with underscores. If the name contains spaces, keep the space.
+        3. If a table or column name contains spaces, wrap it in double quotes (" ").
+        Example: SELECT * FROM "tabsales invoice item";
+        4. Only SELECT queries are allowed (no DML/DDL).
+        5. Always add LIMIT 100 at the end unless a LIMIT is already provided.
+        6. Use explicit column names instead of SELECT *.
+        7. Use proper JOIN conditions when multiple tables are queried.
+        8. Add appropriate WHERE clauses for filtering.
+        9. Use aggregation functions when needed.
+        10. If referencing a column from a table, ensure that the table is included in the FROM clause or properly joined.
+        11. Always define an explicit JOIN when selecting columns from multiple tables. Do not reference a table unless it has been included in FROM or JOIN.
         """
         
         if examples:

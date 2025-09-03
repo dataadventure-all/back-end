@@ -1,5 +1,5 @@
 import asyncio
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 from datetime import datetime
 import asyncpg
 from sqlalchemy import text
@@ -7,6 +7,7 @@ from ..core.database import get_db, get_raw_connection
 from ..core.config import get_settings
 from ..services.llm_service import LLMService
 from ..utils.logger import get_logger
+from app.models.enums import LLMProvider
 import httpx
 import redis.asyncio as redis
 from supabase import create_client, Client
@@ -186,69 +187,45 @@ class HealthCheckService:
             }
         
     async def _test_deepseek(self) -> Dict[str, Any]:
-        """Test DeepSeek via OpenRouter API"""
+        """Test DeepSeek via OpenRouter"""
         try:
-            # Untuk deepseek, kita gunakan  sebagai OpenRouter key
-            api_key = settings.DEEPSEEK_API_KEY
+            from langchain_openai import ChatOpenAI
+            from langchain_core.messages import HumanMessage
+            
+            api_key = settings.OPENROUTER_API_KEY
             if not api_key:
                 return {
                     "success": False,
-                    "error": "DEEPSEEK_API_KEY (OpenRouter) not configured"
+                    "error": "OpenRouter API key not configured",
+                    "model": "unknown"
                 }
-                
-            logger.info("Making request to OpenRouter for DeepSeek...")
             
-            async with httpx.AsyncClient() as client:
-                response = await client.post(
-                    "https://openrouter.ai/api/v1/chat/completions",
-                    headers={
-                        "Authorization": f"Bearer {api_key}",
-                        "Content-Type": "application/json",
-                        "HTTP-Referer": "http://localhost:8000",
-                        "X-Title": "AI Dashboard Health Check"
-                    },
-                    json={
-                        "model": "deepseek/deepseek-r1-0528-qwen3-8b:free",
-                        "messages": [
-                            {"role": "user", "content": "Say 'OK'"}
-                        ],            
-                        "max_tokens": 10,
-                        "temperature": 0
-                    },
-                    timeout=30.0
-                )
-                
-                logger.info(f"OpenRouter response status: {response.status_code}")
-                
-                if response.status_code == 200:
-                    data = response.json()
-                    logger.info(f"OpenRouter response data: {data}")
-                    return {
-                        "success": True,
-                        "model": data.get("model", "deepseek-r1"),
-                        "usage": data.get("usage", {}),
-                        "response_content": data.get("choices", [{}])[0].get("message", {}).get("content", "")
-                    }
-                else:
-                    error_text = response.text[:200] if response.text else "No error details"
-                    logger.error(f"OpenRouter API error: {response.status_code} - {error_text}")
-                    return {
-                        "success": False,
-                        "error": f"OpenRouter API returned {response.status_code}",
-                        "details": error_text
-                    }
-                    
-        except httpx.TimeoutException:
-            logger.error("OpenRouter request timeout")
+            llm = ChatOpenAI(
+                base_url="https://openrouter.ai/api/v1",
+                api_key=api_key,
+                model="deepseek/deepseek-r1:free",
+                temperature=0.1,
+                max_tokens=10,
+                default_headers={
+                    "HTTP-Referer": "http://localhost:8000",
+                    "X-Title": "AI Dashboard"
+                }
+            )
+            
+            result = await llm.ainvoke([HumanMessage("Hello")])
+            
             return {
-                "success": False,
-                "error": "Request timeout (30s)"
+                "success": True,
+                "model": "deepseek-r1-free",
+                "response": result.content[:50],
+                "usage": getattr(result, 'response_metadata', {}).get('usage', {})
             }
+            
         except Exception as e:
-            logger.error(f"OpenRouter connection error: {str(e)}", exc_info=True)
             return {
                 "success": False,
-                "error": f"Connection error: {str(e)}"
+                "error": f"OpenRouter test failed: {str(e)}",
+                "model": "deepseek-r1-free"
             }
     
     async def _test_groq(self) -> Dict[str, Any]:
@@ -377,12 +354,14 @@ class HealthCheckService:
         masked = re.sub(pattern, r'://\1:****@', conn_str)
         return masked
     
-    def _get_api_key(self) -> str:
+    def _get_api_key(self) -> Optional[str]:
         """Get configured API key based on provider"""
-        if settings.LLM_PROVIDER == "groq":
+        if settings.LLM_PROVIDER == "deepseek":
+            return settings.OPENROUTER_API_KEY
+        elif settings.LLM_PROVIDER == "groq":
             return settings.GROQ_API_KEY
         elif settings.LLM_PROVIDER == "openai":
             return settings.OPENAI_API_KEY
-        elif settings.LLM_PROVIDER == "deepseek":
-            return settings.DEEPSEEK_API_KEY
+        elif settings.LLM_PROVIDER == "anthropic":
+            return settings.ANTHROPIC_API_KEY
         return None

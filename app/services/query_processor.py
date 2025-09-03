@@ -37,7 +37,7 @@ class QueryProcessor:
                 return await self._process_advanced_query(request, query_id)
             else:
                 # Current: Simple processing
-                return await self._process_simple_query(request, query_id, start_time)
+                return await self._process_simple_query(request, query_id, start_time, mode)
                 
         except Exception as e:
             logger.error(f"Query processing failed: {str(e)}")
@@ -53,7 +53,8 @@ class QueryProcessor:
         self, 
         request: QueryRequest, 
         query_id: str,
-        start_time: datetime
+        start_time: datetime,
+        mode: QueryMode
     ) -> QueryResponse:
         """Process simple query (current implementation)"""
         

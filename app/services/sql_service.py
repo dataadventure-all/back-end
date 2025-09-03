@@ -32,9 +32,7 @@ class SQLService:
             t.table_name,
             array_agg(
                 json_build_object(
-                    'column', c.column_name,
-                    'type', c.data_type,
-                    'nullable', c.is_nullable::boolean
+                    'column', c.column_name
                 ) ORDER BY c.ordinal_position
             ) as columns
         FROM information_schema.tables t
@@ -56,8 +54,13 @@ class SQLService:
             
         return schema
     
+
     def validate_query(self, sql: str) -> tuple[bool, Optional[str]]:
         """Validate SQL query for safety"""
+        sql = sql.strip()
+        if sql.endswith(";"):
+            sql = sql[:-1]
+
         sql_upper = sql.upper()
         
         # Check for dangerous patterns
@@ -74,6 +77,7 @@ class SQLService:
             sql += ' LIMIT 100'
             
         return True, sql
+
     
     async def execute_query(
         self, 
