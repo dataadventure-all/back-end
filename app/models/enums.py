@@ -11,6 +11,15 @@ class OutputFormat(str, Enum):
     JSON = "json"
     CSV = "csv"
 
+class ChartType(str, Enum):
+    BAR = "bar"
+    LINE = "line"
+    AREA = "area"
+    PIE = "pie"
+    SCATTER = "scatter"
+    HISTOGRAM = "histogram"
+    HEATMAP = "heatmap"
+
 class LLMProvider(str, Enum):
     GROQ = "groq"
     OPENAI = "openai"

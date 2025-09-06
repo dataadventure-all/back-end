@@ -5,7 +5,7 @@ from ..models.schemas import (
     QueryRequest, QueryResponse, QueryStatus,
     SQLQuery, ChartConfig, TokenUsage
 )
-from ..models.enums import QueryMode
+from ..models.enums import QueryMode, OutputFormat
 from .llm_service import LLMService
 from .sql_service import SQLService
 from ..utils.logger import get_logger
@@ -56,10 +56,15 @@ class QueryProcessor:
         start_time: datetime,
         mode: QueryMode
     ) -> QueryResponse:
-        """Process simple query (current implementation)"""
+        """Process simple query with enhanced chart generation support"""
+        
+        chart_generation_start = None
+        chart_config = None
+        chart_fallback_used = False
         
         try:
             # Get schema
+            logger.info(f"Getting database schema for query: {query_id}")
             schema = await self.sql_service.get_schema_info()
             
             # Generate SQL
@@ -74,15 +79,72 @@ class QueryProcessor:
             data, sql_info = await self.sql_service.execute_query(sql_query)
             
             # Generate chart config if needed
-            chart_config = None
-            if request.output_format == "chart" and data:
-                config_dict = await self.llm_service.generate_chart_config(
-                    data=data,
-                    user_prompt=request.prompt
-                )
-                chart_config = ChartConfig(**config_dict)
+            if request.output_format == OutputFormat.CHART and data:
+                try:
+                    chart_generation_start = datetime.now()
+                    logger.info(f"Generating chart configuration for query: {query_id}")
+                    
+                    config_dict = await self.llm_service.generate_chart_config(
+                        data=data,
+                        user_prompt=request.prompt,
+                        preferred_chart_type=getattr(request, 'preferred_chart_type', None),
+                        color_scheme=getattr(request, 'color_scheme', None),
+                        width=getattr(request, 'chart_width', 800),
+                        height=getattr(request, 'chart_height', 400)
+                    )
+                    
+                    # Validate that config_dict has required fields
+                    required_fields = ['chart_type', 'x_axis', 'y_axis', 'title']
+                    if not all(field in config_dict for field in required_fields):
+                        logger.warning(f"Chart config missing required fields: {query_id}")
+                        raise ValueError("Chart config incomplete")
+                    
+                    chart_config = ChartConfig(**config_dict)
+                    logger.info(f"Successfully generated {chart_config.chart_type} chart for query: {query_id}")
+                    
+                except Exception as chart_error:
+                    logger.error(f"Chart generation failed for query {query_id}: {str(chart_error)}")
+                    chart_fallback_used = True
+                    
+                    # Create fallback chart config
+                    try:
+                        fallback_config = self._create_emergency_chart_fallback(data, request.prompt)
+                        chart_config = ChartConfig(**fallback_config)
+                        logger.info(f"Using fallback chart config for query: {query_id}")
+                    except Exception as fallback_error:
+                        logger.error(f"Fallback chart generation also failed: {str(fallback_error)}")
+                        # Continue without chart config
+                        chart_config = None
             
+            elif request.output_format == OutputFormat.CHART and not data:
+                logger.warning(f"Chart requested but no data returned for query: {query_id}")
+            
+            # Calculate execution times
             execution_time = (datetime.now() - start_time).total_seconds()
+            chart_generation_time = None
+            if chart_generation_start:
+                chart_generation_time = (datetime.now() - chart_generation_start).total_seconds()
+            
+            # Create metadata with enhanced information
+            metadata = {
+                "mode": mode.value,
+                "row_count": len(data) if data else 0,
+                "column_count": len(data[0].keys()) if data else 0,
+                "processing_time_ms": execution_time * 1000,
+                "chart_requested": request.output_format == OutputFormat.CHART,
+                "chart_generated": chart_config is not None,
+                "chart_fallback_used": chart_fallback_used
+            }
+            
+            if chart_generation_time:
+                metadata["chart_generation_time_ms"] = chart_generation_time * 1000
+            
+            # Add data summary if we have data
+            if data:
+                metadata.update({
+                    "first_row_sample": {k: v for k, v in list(data[0].items())[:3]} if data else {},
+                    "column_names": list(data[0].keys()) if data else []
+                })
             
             return QueryResponse(
                 success=True,
@@ -91,17 +153,84 @@ class QueryProcessor:
                 sql_query=sql_info,
                 data=data,
                 chart_config=chart_config,
-                metadata={
-                    "mode": mode.value,
-                    "row_count": len(data),
-                    "processing_time_ms": execution_time * 1000
-                },
+                metadata=metadata,
                 execution_time=execution_time,
-                token_usage=token_usage.dict()
+                token_usage=token_usage.dict() if token_usage else None,
+                chart_generation_time=chart_generation_time,
+                chart_fallback_used=chart_fallback_used
             )
             
         except Exception as e:
-            raise
+            logger.error(f"Query processing failed for {query_id}: {str(e)}")
+            execution_time = (datetime.now() - start_time).total_seconds()
+            
+            # Return error response
+            return QueryResponse(
+                success=False,
+                query_id=query_id,
+                status=QueryStatus.FAILED,
+                sql_query=None,
+                data=None,
+                chart_config=None,
+                metadata={
+                    "mode": mode.value,
+                    "processing_time_ms": execution_time * 1000,
+                    "error_type": type(e).__name__
+                },
+                error=str(e),
+                execution_time=execution_time,
+                token_usage=None
+            )
+
+    def _create_emergency_chart_fallback(self, data: List[Dict], user_prompt: str) -> Dict:
+        """Emergency fallback when both LLM and regular fallback fail"""
+        if not data:
+            return {
+                "chart_type": "bar",
+                "x_axis": "category", 
+                "y_axis": "value",
+                "title": "No Data Available",
+                "colors": ["#8884d8", "#82ca9d", "#ffc658"],
+                "color_scheme": "blue",
+                "width": 800,
+                "height": 400,
+                "show_legend": True,
+                "show_grid": True,
+                "show_tooltip": True,
+                "animate": True,
+                "additional_config": {}
+            }
+        
+        columns = list(data[0].keys())
+        
+        # Very simple logic - first column as x, second as y (or first if only one)
+        x_axis = columns[0]
+        y_axis = columns[1] if len(columns) > 1 else columns[0]
+        
+        # Detect if we should use bar or line based on column names
+        chart_type = "bar"
+        if any(word in user_prompt.lower() for word in ["trend", "over time", "timeline", "progression"]):
+            chart_type = "line"
+        elif any(word in user_prompt.lower() for word in ["distribution", "spread"]):
+            chart_type = "histogram"
+        
+        return {
+            "chart_type": chart_type,
+            "x_axis": x_axis,
+            "y_axis": y_axis, 
+            "title": f"Emergency Chart: {user_prompt[:30]}..." if user_prompt else "Data Visualization",
+            "colors": ["#8884d8", "#82ca9d", "#ffc658", "#ff7300", "#00ff00"],
+            "color_scheme": "blue",
+            "width": 800,
+            "height": 400,
+            "show_legend": True,
+            "show_grid": True,
+            "show_tooltip": True,
+            "animate": True,
+            "aggregate_function": None,
+            "group_by": None,
+            "additional_config": {}
+        }
     
     async def _process_advanced_query(
         self, 
