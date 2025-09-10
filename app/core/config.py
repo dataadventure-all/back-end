@@ -35,8 +35,12 @@ class Settings(BaseSettings):
     USE_ADVANCED_MODE_THRESHOLD: int = 10000  # Switch to graph/vector
     
     # Cache
-    REDIS_URL: Optional[str] = "redis://localhost:6379/0"
-    CACHE_TTL: int = 3600  # 1 hour
+    REDIS_URL: str = "redis://localhost:6379/0"
+    REDIS_PASSWORD: Optional[str] = None
+    REDIS_MAX_CONNECTIONS: int = 20
+    ENABLE_QUERY_CACHE: bool = True
+    QUERY_CACHE_TTL_MINUTES: int = 60
+    CHART_CACHE_TTL_HOURS: int = 24
     
     # Security
     SECRET_KEY: str

@@ -8,6 +8,7 @@ from ..core.config import get_settings
 from ..api.dependencies import get_query_processor, rate_limit
 from ..utils.logger import get_logger
 from datetime import datetime
+import uuid
 
 logger = get_logger(__name__)
 settings = get_settings()
@@ -36,25 +37,46 @@ async def process_query(
     request: QueryRequest,
     background_tasks: BackgroundTasks,
     processor: QueryProcessor = Depends(get_query_processor)
-):
-    """Process a natural language query"""
+) -> QueryResponse:
+    """Process a natural language query and return simplified response"""
+    
+    query_id = str(uuid.uuid4())  # generate query_id di awal
     
     try:
         logger.info(f"Processing query: {request.prompt[:100]}...")
-        
-        # Process query
-        response = await processor.process_query(request)
-        
-        # Add background task for analytics/logging
+
+        result = await processor.process_query(request)
+
+        # Ambil query dari result jika ada, aman untuk dict atau object
+        query_value = None
+        if isinstance(result, dict):
+            query_value = result.get("query")
+        elif hasattr(result, "query"):
+            query_value = result.query
+
+        response = QueryResponse(
+            query_id=query_id,
+            prompt=request.prompt,
+            mode=request.mode,
+            query=query_value,
+            success=True,
+            error=None
+        )
+
+        # Background task untuk logging/analytics
         background_tasks.add_task(log_query_analytics, request, response)
-        
+
         return response
-        
+
     except Exception as e:
         logger.error(f"Query processing error: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(e)
+
+        return QueryResponse(
+            query_id=query_id,  # pakai query_id sama dengan di atas
+            prompt=request.prompt,
+            mode=request.mode,
+            success=False,
+            error=str(e)
         )
 
 @router.get("/schema")
