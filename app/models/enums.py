@@ -32,3 +32,8 @@ class QueryStatus(str, Enum):
     PROCESSING = "processing"
     SUCCESS = "success"
     FAILED = "failed"
+
+class Tools(str, Enum):
+    EXCEL = "excel"
+    CSV = "csv"
+    POSTGRE = "postgre"

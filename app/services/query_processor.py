@@ -10,7 +10,7 @@ from ..models.schemas import (
 from ..models.enums import QueryMode
 from .llm_service import LLMService
 from .sql_service import SQLService
-from .redis_service import redis_service  
+from .redis_service import redis_service
 from ..utils.logger import get_logger
 from ..core.config import get_settings
 

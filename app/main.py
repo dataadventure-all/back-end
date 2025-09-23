@@ -10,6 +10,7 @@ from .services.redis_service import redis_service
 from .core.config import get_settings
 from .utils.logger import setup_logging, get_logger
 from .core.database import engine
+from .api.import_route.excel_routes import router as excel_router
 
 settings = get_settings()
 logger = get_logger(__name__)
@@ -160,6 +161,7 @@ async def global_exception_handler(request: Request, exc: Exception):
 # Include routers
 app.include_router(router)
 app.include_router(health_router)
+app.include_router(excel_router) 
 
 # NEW: Enhanced root endpoint with system status
 @app.get("/")
@@ -203,6 +205,7 @@ async def root():
             "health": "/health",
             "docs": "/docs" if settings.DEBUG else "disabled",
             "cache_stats": "/cache/stats",
+            "excel": "/api/v1/excel/",
             "api": "/api/v1/"
         }
     }

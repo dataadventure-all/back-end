@@ -42,7 +42,7 @@ class LLMService:
         elif self.provider == LLMProvider.DEEPSEEK:
             return ChatOpenAI(
             base_url="https://openrouter.ai/api/v1",
-            api_key=settings.OPENROUTER_API_KEY,
+            api_key=settings.DEEPSEEK_API_KEY,
             model="deepseek/deepseek-r1:free",
             temperature=0,
             max_tokens=settings.MAX_RESPONSE_TOKENS,
