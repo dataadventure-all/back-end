@@ -24,9 +24,37 @@ class QueryProcessor:
         self.llm_service = LLMService()
         self.sql_service = SQLService()
         self.redis_service = redis_service
+        self.schema_cache: Optional[dict] = None
+        self.initialized = False
         
+    async def initialize(self):
+        """Async setup for QueryProcessor, e.g., check connections, pre-load schema"""
+        if self.initialized:
+            return
+        
+        try:
+            # Cek koneksi Redis
+            if await self.redis_service.is_connected():
+                logger.info("Redis connection ready")
+            else:
+                logger.warning("Redis not connected at initialization")
+            
+            # Pre-load database schema
+            self.schema_cache = await self.sql_service.get_schema_info()
+            if await self.redis_service.is_connected():
+                await self.redis_service.set_cache("db_schema", self.schema_cache, expire_seconds=3600)
+                logger.info("Database schema cached at initialization")
+            
+            self.initialized = True
+            logger.info("QueryProcessor initialized successfully")
+        
+        except Exception as e:
+            logger.error(f"Initialization failed: {e}")
+            self.initialized = False
+
     async def process_query(self, request: QueryRequest) -> QueryResponse:
         """Process user query and return simplified response"""
+        query_id = str(uuid.uuid4())  # selalu generate query_id
         
         try:
             # Check cache first if enabled
@@ -34,6 +62,8 @@ class QueryProcessor:
                 cached_result = await self._check_query_cache(request)
                 if cached_result:
                     logger.info(f"Cache hit for query")
+                    # Pastikan query_id ada
+                    cached_result.setdefault("query_id", query_id)
                     return QueryResponse(**cached_result)
             
             # Determine processing mode
@@ -64,9 +94,10 @@ class QueryProcessor:
             response = QueryResponse(
                 prompt=request.prompt,
                 mode=mode.value,
-                query_id=str(uuid.uuid4()),
+                query_id=query_id,
                 query=query_string,
-                success=True
+                success=True,
+                token_usage=token_usage
             )
             
             # Cache successful results
@@ -81,6 +112,7 @@ class QueryProcessor:
             logger.error(f"Error details: {repr(e)}")
             
             return QueryResponse(
+                query_id=query_id,
                 prompt=request.prompt,
                 mode=QueryMode.SIMPLE.value,
                 query=None,
@@ -88,7 +120,7 @@ class QueryProcessor:
                 error=f"{type(e).__name__}: {str(e)}"
             )
     
-    # Cache methods
+    # ---------------- Cache Methods ----------------
     async def _check_query_cache(self, request: QueryRequest) -> Optional[dict]:
         """Check if query result is cached in Redis"""
         try:
@@ -116,11 +148,8 @@ class QueryProcessor:
                 return
                 
             query_hash = self._generate_query_hash(request)
-            
-            # Convert result to dict for caching
             result_dict = result.dict()
             
-            # Cache for configured TTL
             success = await self.redis_service.cache_query_result(
                 query_hash,
                 result_dict,
@@ -135,21 +164,24 @@ class QueryProcessor:
         except Exception as e:
             logger.error(f"Failed to cache query result: {e}")
     
+    # ---------------- Schema Methods ----------------
     async def _get_cached_schema(self) -> dict:
-        """Get database schema with Redis caching"""
+        """Get database schema with Redis caching or preloaded schema"""
         try:
+            # Gunakan schema dari initialize() jika sudah ada
+            if self.schema_cache:
+                return self.schema_cache
+            
             if await self.redis_service.is_connected():
-                # Try cache first
                 cached_schema = await self.redis_service.get_cache("db_schema")
-                
                 if cached_schema:
                     logger.debug("Using cached database schema")
+                    self.schema_cache = cached_schema
                     return cached_schema
             
-            # Get fresh schema
             schema = await self.sql_service.get_schema_info()
+            self.schema_cache = schema
             
-            # Cache schema for 1 hour if Redis is available
             if await self.redis_service.is_connected():
                 await self.redis_service.set_cache("db_schema", schema, expire_seconds=3600)
                 logger.debug("Database schema fetched and cached")
@@ -158,9 +190,9 @@ class QueryProcessor:
             
         except Exception as e:
             logger.error(f"Schema caching failed: {e}")
-            # Fallback to direct fetch
             return await self.sql_service.get_schema_info()
     
+    # ---------------- Utility Methods ----------------
     def _generate_query_hash(self, request: QueryRequest) -> str:
         """Generate unique hash for query caching"""
         cache_key_data = {
@@ -177,7 +209,6 @@ class QueryProcessor:
         if request.mode != QueryMode.AUTO:
             return request.mode
         
-        # Count tokens
         token_count = self.llm_service.count_tokens(request.prompt)
         
         if token_count > settings.USE_ADVANCED_MODE_THRESHOLD:

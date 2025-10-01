@@ -5,6 +5,7 @@ from langchain.chat_models import ChatOpenAI
 from langchain.prompts import PromptTemplate
 from langchain.schema import BaseMessage, HumanMessage, SystemMessage
 import tiktoken
+import asyncio
 from ..core.config import get_settings
 from ..models.schemas import TokenUsage
 from ..models.enums import LLMProvider
@@ -64,7 +65,7 @@ class LLMService:
         schema_context: Dict[str, Any],
         examples: Optional[List[Dict]] = None
     ) -> tuple[str, TokenUsage]:
-        """Generate SQL query from natural language"""
+        """Generate SQL query from natural language with retry logic for rate limits"""
         
         # Build context
         system_prompt = self._build_sql_system_prompt(schema_context, examples)
@@ -82,64 +83,36 @@ class LLMService:
             HumanMessage(content=prompt)
         ]
         
-        try:
-            response = await self.llm.ainvoke(messages)
-            sql_query = self._extract_sql_from_response(response.content)
-            
-            completion_tokens = self.count_tokens(response.content)
-            
-            token_usage = TokenUsage(
-                prompt_tokens=prompt_tokens,
-                completion_tokens=completion_tokens,
-                total_tokens=prompt_tokens + completion_tokens,
-                estimated_cost=self._calculate_cost(prompt_tokens, completion_tokens)
-            )
-            
-            return sql_query, token_usage
-            
-        except Exception as e:
-            logger.error(f"LLM query generation failed: {str(e)}")
-            raise
+        # Retry logic for rate limits
+        max_retries = 3
+        
+        for attempt in range(max_retries):
+            try:
+                response = await self.llm.ainvoke(messages)
+                sql_query = self._extract_sql_from_response(response.content)
+                
+                completion_tokens = self.count_tokens(response.content)
+                
+                token_usage = TokenUsage(
+                    prompt_tokens=prompt_tokens,
+                    completion_tokens=completion_tokens,
+                    total_tokens=prompt_tokens + completion_tokens,
+                    estimated_cost=self._calculate_cost(prompt_tokens, completion_tokens)
+                )
+                
+                return sql_query, token_usage
+                
+            except Exception as e:
+                error_str = str(e)
+                if "429" in error_str and attempt < max_retries - 1:
+                    wait_time = 60 * (attempt + 1)  # 60s, 120s, 180s
+                    logger.warning(f"Rate limited (429), waiting {wait_time}s (attempt {attempt + 1}/{max_retries})")
+                    await asyncio.sleep(wait_time)
+                    continue
+                else:
+                    logger.error(f"LLM query generation failed: {error_str}")
+                    raise
     
-    # async def generate_chart_config(
-    #     self,
-    #     data: List[Dict],
-    #     user_prompt: str
-    # ) -> Dict[str, Any]:
-    #     """Generate chart configuration from data"""
-        
-    #     # Sample data for context (limit to reduce tokens)
-    #     sample_data = data[:5] if len(data) > 5 else data
-        
-    #     prompt = f"""
-    #     Given this data sample:
-    #     {json.dumps(sample_data, indent=2)}
-        
-    #     User request: {user_prompt}
-        
-    #     Generate a chart configuration with:
-    #     - chart_type: "line", "bar", "area", "pie", or "scatter"
-    #     - x_axis: field name for x-axis
-    #     - y_axis: field name for y-axis
-    #     - title: descriptive title
-        
-    #     Return as JSON only.
-    #     """
-        
-    #     messages = [HumanMessage(content=prompt)]
-    #     response = await self.llm.ainvoke(messages)
-        
-    #     try:
-    #         config = json.loads(response.content)
-    #         return config
-    #     except json.JSONDecodeError:
-    #         # Fallback config
-    #         return {
-    #             "chart_type": "bar",
-    #             "x_axis": list(data[0].keys())[0],
-    #             "y_axis": list(data[0].keys())[1] if len(data[0].keys()) > 1 else list(data[0].keys())[0],
-    #             "title": "Data Visualization"
-    #         }
     async def generate_chart_config(
             self,
             data: List[Dict],

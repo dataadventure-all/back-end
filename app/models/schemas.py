@@ -5,6 +5,8 @@ from .enums import QueryMode, OutputFormat, QueryStatus, Tools
 from sqlalchemy import Column, Integer, String, DateTime, Text, JSON, Boolean
 from sqlalchemy.sql import func
 from ..core.database import Base
+from sqlalchemy.dialects.postgresql import UUID
+import uuid
 
 # Request Models
 class QueryRequest(BaseModel):
@@ -109,6 +111,19 @@ class DataSummary(BaseModel):
     has_nulls: bool = False
     sample_values: Optional[Dict[str, Any]] = None
 
+# Token tracking
+class TokenUsage(BaseModel):
+    prompt_tokens: int
+    completion_tokens: int
+    total_tokens: int
+    estimated_cost: float
+    
+    @property
+    def requires_advanced_mode(self) -> bool:
+        from ..core.config import get_settings
+        settings = get_settings()
+        return self.total_tokens > settings.USE_ADVANCED_MODE_THRESHOLD
+
 class QueryResponse(BaseModel):
     prompt: str
     mode: str
@@ -116,6 +131,7 @@ class QueryResponse(BaseModel):
     query: Optional[str] = None
     success: bool = False
     error: Optional[str] = None
+    token_usage: Optional[TokenUsage] = None
 
 class HealthResponse(BaseModel):
     status: str
@@ -130,19 +146,6 @@ class ToolsResponse(BaseModel):
     error: str  
     tools: str
     success: bool = False
-    
-# Token tracking
-class TokenUsage(BaseModel):
-    prompt_tokens: int
-    completion_tokens: int
-    total_tokens: int
-    estimated_cost: float
-    
-    @property
-    def requires_advanced_mode(self) -> bool:
-        from ..core.config import get_settings
-        settings = get_settings()
-        return self.total_tokens > settings.USE_ADVANCED_MODE_THRESHOLD
 
 class ChartGenerationRequest(BaseModel):
     """Direct chart generation without SQL query"""
@@ -300,10 +303,11 @@ class QueryRequestWithDataset(QueryRequest):
     
 
 class SchemeExcel(Base):
-    __tablename__ = "scheme_excel"
+    __tablename__ = "schema_excel"
+    __table_args__ = {"schema": "public"}
     
     id = Column(Integer, primary_key=True, index=True)
-    dataset_id = Column(String, unique=True, index=True, nullable=False)
+    dataset_id = Column(UUID(as_uuid=True), unique=True, nullable=False, default=uuid.uuid4)
     dataset_name = Column(String, nullable=False)
     filename = Column(String, nullable=False)
     sheet_name = Column(String, nullable=False)
