@@ -25,34 +25,105 @@ class SQLService:
     def __init__(self):
         self.max_execution_time = 30  # seconds
         
-    async def get_schema_info(self) -> Dict[str, Any]:
-        """Get database schema information"""
-        query = """
-        SELECT 
-            t.table_name,
-            array_agg(
-                json_build_object(
-                    'column', c.column_name
-                ) ORDER BY c.ordinal_position
-            ) as columns
-        FROM information_schema.tables t
-        JOIN information_schema.columns c 
-            ON t.table_name = c.table_name 
-            AND t.table_schema = c.table_schema
-        WHERE t.table_schema = 'public' 
-            AND t.table_type = 'BASE TABLE'
-        GROUP BY t.table_name
-        ORDER BY t.table_name;
-        """
-        
+    # ----------------------------------------
+# Main dispatcher
+# ----------------------------------------
+    async def get_schema_info(self, querytype: str, dataset_id: str) -> Dict[str, Any]:
+        """Route ke fungsi sesuai querytype"""
+        if querytype == "excel":
+            return await self._get_excel_schema(dataset_id)
+        elif querytype == "csv":
+            return await self._get_csv_schema(dataset_id)
+        else:
+            return await self._get_public_schema()
+
+
+    # ----------------------------------------
+    # Handler khusus Excel
+    # ----------------------------------------
+    async def _get_excel_schema(self, dataset_id: str) -> Dict[str, Any]:
+        """Ambil schema info untuk dataset Excel"""
         async with get_raw_connection() as conn:
+            # 🔹 1. Ambil metadata dari tabel datasets_metadata
+            meta_sql = """
+                SELECT schema_name, table_name
+                FROM schema_excel.datasets_metadata
+                WHERE dataset_id = 5f0c22cc-bf8b-4ff0-b5b8-693d9668fbb6
+                LIMIT 1
+            """
+            meta_row = await conn.fetchrow(meta_sql, dataset_id)
+            if not meta_row:
+                raise ValueError(f"Dataset ID {dataset_id} not found in metadata")
+
+            schema_name = meta_row["schema_name"]
+            table_name = meta_row["table_name"]
+
+            # 🔹 2. Ambil kolom dari information_schema
+            columns_sql = """
+                SELECT 
+                    c.column_name,
+                    c.data_type,
+                    c.is_nullable,
+                    c.character_maximum_length
+                FROM information_schema.columns c
+                WHERE c.table_schema = $1
+                AND c.table_name = $2
+                ORDER BY c.ordinal_position
+            """
+            rows = await conn.fetch(columns_sql, schema_name, table_name)
+
+            # 🔹 3. Format hasil
+            return {
+                table_name: [
+                    {
+                        "column": r["column_name"],
+                        "type": r["data_type"],
+                        "nullable": r["is_nullable"],
+                        "max_length": r["character_maximum_length"],
+                    }
+                    for r in rows
+                ]
+            }
+
+
+    # ----------------------------------------
+    # Handler khusus CSV (nanti bisa isi)
+    # ----------------------------------------
+    async def _get_csv_schema(self, dataset_id: str) -> Dict[str, Any]:
+        """Ambil schema untuk CSV (belum diimplementasi)"""
+        logger.warning("CSV schema fetch not implemented yet")
+        return {}
+
+
+    # ----------------------------------------
+    # Handler default untuk schema public
+    # ----------------------------------------
+    async def _get_public_schema(self) -> Dict[str, Any]:
+        """Ambil schema default dari public"""
+        async with get_raw_connection() as conn:
+            query = """
+            SELECT 
+                t.table_name,
+                array_agg(
+                    json_build_object('column', c.column_name)
+                    ORDER BY c.ordinal_position
+                ) AS columns
+            FROM information_schema.tables t
+            JOIN information_schema.columns c
+            ON t.table_name = c.table_name
+            AND t.table_schema = c.table_schema
+            WHERE t.table_schema = 'public'
+            AND t.table_type = 'BASE TABLE'
+            GROUP BY t.table_name
+            ORDER BY t.table_name
+            """
             rows = await conn.fetch(query)
-            
-        schema = {}
-        for row in rows:
-            schema[row['table_name']] = row['columns']
-            
-        return schema
+
+            schema = {}
+            for row in rows:
+                schema[row["table_name"]] = row["columns"]
+            return schema
+
     
 
     def validate_query(self, sql: str) -> tuple[bool, Optional[str]]:

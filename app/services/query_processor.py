@@ -52,7 +52,7 @@ class QueryProcessor:
             logger.error(f"Initialization failed: {e}")
             self.initialized = False
 
-    async def process_query(self, request: QueryRequest) -> QueryResponse:
+    async def process_query(self, request: QueryRequest, dataset_id: str) -> QueryResponse:
         """Process user query and return simplified response"""
         query_id = str(uuid.uuid4())  # selalu generate query_id
         
@@ -71,10 +71,10 @@ class QueryProcessor:
             
             # Get schema with caching
             logger.info(f"Getting database schema for query")
-            schema = await self._get_cached_schema()
+            schema = await self._get_cached_schema(request.querytype, dataset_id)
             
             # Generate SQL
-            logger.info(f"Generating SQL for query")
+            logger.info(f"Generating SQL for query{schema}")
             sql_query, token_usage = await self.llm_service.generate_sql_query(
                 prompt=request.prompt,
                 schema_context=schema
@@ -165,7 +165,7 @@ class QueryProcessor:
             logger.error(f"Failed to cache query result: {e}")
     
     # ---------------- Schema Methods ----------------
-    async def _get_cached_schema(self) -> dict:
+    async def _get_cached_schema(self, querytype: str, dataset_id: str) -> dict:
         """Get database schema with Redis caching or preloaded schema"""
         try:
             # Gunakan schema dari initialize() jika sudah ada
@@ -178,8 +178,8 @@ class QueryProcessor:
                     logger.debug("Using cached database schema")
                     self.schema_cache = cached_schema
                     return cached_schema
-            
-            schema = await self.sql_service.get_schema_info()
+
+            schema = await self.sql_service.get_schema_info(querytype, dataset_id)
             self.schema_cache = schema
             
             if await self.redis_service.is_connected():
@@ -190,7 +190,7 @@ class QueryProcessor:
             
         except Exception as e:
             logger.error(f"Schema caching failed: {e}")
-            return await self.sql_service.get_schema_info()
+            return await self.sql_service.get_schema_info(querytype)
     
     # ---------------- Utility Methods ----------------
     def _generate_query_hash(self, request: QueryRequest) -> str:

@@ -9,17 +9,23 @@ from sqlalchemy.dialects.postgresql import UUID
 import uuid
 
 # Request Models
+from pydantic import BaseModel, Field, field_validator
+
 class QueryRequest(BaseModel):
     prompt: str = Field(..., min_length=1, max_length=10000)
     mode: QueryMode = QueryMode.AUTO
     use_cache: bool = True
-    
-    @validator('prompt')
-    def validate_prompt(cls, v):
+
+
+    @field_validator('prompt')
+    @classmethod
+    def validate_prompt(cls, v: str) -> str:
         if not v.strip():
             raise ValueError("Prompt cannot be empty")
         return v.strip()
-    
+
+class ExcelQueryRequest(QueryRequest):
+    dataset_id: str
 
 class AdvancedQueryRequest(QueryRequest):
     """For future graph/vector implementation"""
@@ -176,6 +182,7 @@ class FileUploadResponse(BaseModel):
     file_info: Dict[str, Any]
     
     class Config:
+        orm_mode = True
         json_schema_extra = {
             "example": {
                 "success": True,

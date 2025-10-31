@@ -6,6 +6,7 @@ import re
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
 from typing import Dict, Any, Optional, List
+import json
 
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, text
@@ -95,24 +96,46 @@ class DynamicExcelService:
             raise InvalidFileFormatError(f"Invalid Excel file: {str(e)}")
 
     # ---------------------- Dynamic Table Creation ----------------------
+
     async def _create_dynamic_table(self, df: pd.DataFrame, table_name: str, dataset_id: str):
+        schema_name = 'schema_excel'
         column_defs = [
             "id SERIAL PRIMARY KEY",
             f"dataset_id VARCHAR(50) DEFAULT '{dataset_id}'",
             "created_at TIMESTAMP DEFAULT NOW()"
         ]
+        
+        # 🔹 1. Generate definisi kolom dari DataFrame
         for col in df.columns:
             col_name = self._sanitize_column_name(col)
             col_type = self._infer_sql_type(df[col].dtype, df[col].dropna())
             column_defs.append(f'"{col_name}" {col_type}')
 
+        # 🔹 2. Query CREATE TABLE dinamis
         create_sql = f"""
-        CREATE TABLE IF NOT EXISTS "{table_name}" (
+        CREATE TABLE IF NOT EXISTS "{schema_name}"."{table_name}" (
             {', '.join(column_defs)}
         )
         """
+
+        # 🔹 3. Jalankan CREATE TABLE di thread pool
         loop = asyncio.get_event_loop()
         await loop.run_in_executor(self.executor, self._execute_sync_ddl, create_sql)
+
+        # 🔹 4. Setelah tabel berhasil dibuat → daftarkan ke tabel metadata
+        try:
+            await self._register_dataset_metadata(
+                dataset_id=dataset_id,
+                table_name=table_name,
+                df=df,
+                original_filename="unknown.xlsx",  # bisa diisi dari request.file.filename
+                created_by="system"                # atau dari user login
+            )
+            logger.info(f"Registered metadata for dataset {dataset_id}")
+        except Exception as e:
+            logger.error(f"Failed to register dataset metadata: {e}")
+
+        # 🔹 5. Logging final
         logger.info(f"Created dynamic table: {table_name}")
 
     def _execute_sync_ddl(self, sql: str):
@@ -153,8 +176,58 @@ class DynamicExcelService:
         sync_url = self.settings.DATABASE_URL.replace("postgresql://", "postgresql+psycopg2://")
         engine = create_engine(sync_url, echo=False)
         # Schema None = default public
-        batch_df.to_sql(table_name, engine, schema=None, if_exists="append", index=False, method="multi")
+        batch_df.to_sql(table_name, engine, schema='schema_excel', if_exists="append", index=False, method="multi")
         engine.dispose()
+
+
+    async def _register_dataset_metadata(
+        self,
+        dataset_id: str,
+        table_name: str,
+        df: pd.DataFrame,
+        original_filename: str,
+        created_by: str = None
+    ):
+        """Register dataset info ke tabel metadata"""
+        schema_name = "schema_excel"
+        column_names = list(df.columns)
+        row_count = len(df)
+        column_count = len(df.columns)
+
+        insert_sql = f"""
+        INSERT INTO "{schema_name}".datasets_metadata 
+        (dataset_id, schema_name, table_name, original_filename, created_by, row_count, column_count, column_names)
+        VALUES (:dataset_id, :schema_name, :table_name, :original_filename, :created_by, :row_count, :column_count, :column_names)
+        ON CONFLICT (dataset_id) DO NOTHING;
+        """
+
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(
+            self.executor,
+            self._execute_sync_metadata_insert,
+            insert_sql,
+            {
+                "dataset_id": dataset_id,
+                "schema_name": schema_name,
+                "table_name": table_name,
+                "original_filename": original_filename,
+                "created_by": created_by,
+                "row_count": row_count,
+                "column_count": column_count,
+                "column_names": json.dumps(column_names),
+            },
+        )
+        logger.info(f"Registered metadata for dataset {dataset_id}")
+
+    def _execute_sync_metadata_insert(self, sql: str, params: dict):
+        from sqlalchemy import create_engine, text
+        sync_url = self.settings.DATABASE_URL.replace("postgresql://", "postgresql+psycopg2://")
+        engine = create_engine(sync_url, echo=False)
+        with engine.connect() as conn:
+            conn.execute(text(sql), params)
+            conn.commit()
+            engine.dispose()
+
 
     # ---------------------- Main Excel Processing ----------------------
     async def process_excel_dynamic_table(
@@ -171,7 +244,7 @@ class DynamicExcelService:
         df = excel_data["dataframe"]
 
         dataset_id = uuid.uuid4()
-        dataset_name = name or f"excel_{dataset_id[:8]}"
+        dataset_name = name or f"excel_{str(dataset_id)[:8]}"
         table_name = self._sanitize_table_name(dataset_name)
 
         if create_table:
