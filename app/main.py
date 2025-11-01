@@ -11,6 +11,7 @@ from .core.config import get_settings
 from .utils.logger import setup_logging, get_logger
 from .core.database import engine
 from .api.import_route.excel_routes import router as excel_router
+from .api.import_route.csv_routes import router as csv_router
 
 settings = get_settings()
 logger = get_logger(__name__)
@@ -161,7 +162,8 @@ async def global_exception_handler(request: Request, exc: Exception):
 # Include routers
 app.include_router(router)
 app.include_router(health_router)
-app.include_router(excel_router) 
+app.include_router(excel_router)
+app.include_router(csv_router) 
 
 # NEW: Enhanced root endpoint with system status
 @app.get("/")
