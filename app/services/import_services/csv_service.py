@@ -1,3 +1,4 @@
+# back-end/app/services/import_services/csv_service.py
 # services/dynamic_csv_service.py
 import pandas as pd
 import io
@@ -28,28 +29,13 @@ class DynamicCsvService(DynamicExcelService):
     """Service untuk menangani CSV dengan dynamic table creation, 
     menggunakan ulang logic umum dari DynamicExcelService"""
 
-    # Definisikan nama skema spesifik untuk CSV
     SCHEMA_NAME = 'schema_csv'
 
     def __init__(self):
-        # Panggil __init__ dari DynamicExcelService (untuk inisialisasi executor, settings, dll.)
         super().__init__()
-        # Set nama skema untuk digunakan di metode-metode yang dioverride
         self.schema_name = self.SCHEMA_NAME
 
-    # ---------------------- Sanitization, Type Inference, Execution ----------------------
-    # Metode-metode berikut (sanitasi, inferensi tipe, eksekusi sinkron DDL/Insert, dan Query)
-    # diwarisi dari DynamicExcelService karena memiliki logika yang identik:
-    # - _sanitize_table_name
-    # - _sanitize_column_name
-    # - _infer_sql_type
-    # - _execute_sync_ddl
-    # - _execute_sync_metadata_insert
-    # - _insert_data_to_dynamic_table (metode ini memanggil _insert_batch_sync yang akan kita override)
-    # - query_dynamic_table 
-    
-    # ---------------------- CSV Parsing (CSV-specific) ----------------------
-    # Metode parsing harus dipertahankan karena logika untuk CSV berbeda dengan Excel
+    # ---------------------- CSV Parsing (Dipertahankan karena spesifik CSV) ----------------------
     def _parse_csv(self, file_contents: bytes, encoding: Optional[str] = None, delimiter: Optional[str] = None) -> Dict[str, Any]:
         """
         Parse CSV file. CSV tidak memiliki sheet seperti Excel.
@@ -76,8 +62,8 @@ class DynamicCsvService(DynamicExcelService):
                                 io.BytesIO(file_contents),
                                 encoding=enc,
                                 delimiter=delim,
-                                on_bad_lines='skip',
-                                engine='python' 
+                                on_bad_lines='skip',  # Skip bad lines instead of erroring
+                                engine='python'  # More flexible for malformed files
                             )
                             detected_encoding = enc
                             if delimiter is None and delim != ',':
@@ -125,7 +111,8 @@ class DynamicCsvService(DynamicExcelService):
         except Exception as e:
             raise InvalidFileFormatError(f"Invalid CSV file: {str(e)}")
 
-    # ---------------------- Schema and Metadata Table Creation (CSV-specific) ----------------------
+
+    # ---------------------- Schema and Metadata Table Creation (Dipertahankan) ----------------------
     # Dipertahankan karena DynamicExcelService tidak memiliki implementasi eksplisitnya
     async def _ensure_schema_and_metadata_table(self):
         """Ensure schema_csv schema and datasets_metadata table exist"""
@@ -148,7 +135,6 @@ class DynamicCsvService(DynamicExcelService):
         );
         """
         
-        # Execute schema creation first, then table creation (menggunakan _execute_sync_ddl yang diwarisi)
         loop = asyncio.get_event_loop()
         await loop.run_in_executor(self.executor, self._execute_sync_ddl, create_schema_sql)
         await loop.run_in_executor(self.executor, self._execute_sync_ddl, create_metadata_table_sql)
@@ -158,7 +144,7 @@ class DynamicCsvService(DynamicExcelService):
     async def _create_dynamic_table(self, df: pd.DataFrame, table_name: str, dataset_id: str):
         schema_name = self.schema_name
         
-        # Ensure schema and metadata table exist first
+        # Ensure schema and metadata table exist first (DIJAGA untuk Fungsionalitas)
         await self._ensure_schema_and_metadata_table()
         
         column_defs = [
@@ -167,7 +153,7 @@ class DynamicCsvService(DynamicExcelService):
             "created_at TIMESTAMP DEFAULT NOW()"
         ]
         
-        # 1. Generate definisi kolom dari DataFrame (menggunakan metode yang diwarisi)
+        # 1. Generate definisi kolom dari DataFrame (diwarisi)
         for col in df.columns:
             col_name = self._sanitize_column_name(col)
             col_type = self._infer_sql_type(df[col].dtype, df[col].dropna())
@@ -180,7 +166,7 @@ class DynamicCsvService(DynamicExcelService):
         )
         """
 
-        # 3. Jalankan CREATE TABLE di thread pool (menggunakan _execute_sync_ddl yang diwarisi)
+        # 3. Jalankan CREATE TABLE di thread pool (diwarisi)
         loop = asyncio.get_event_loop()
         await loop.run_in_executor(self.executor, self._execute_sync_ddl, create_sql)
 
@@ -212,7 +198,7 @@ class DynamicCsvService(DynamicExcelService):
 
 
     # ---------------------- Register Metadata (Override untuk nama skema) ----------------------
-    # Override untuk menggunakan self.schema_name saat membuat SQL dan parameter
+    # Hapus panggilan _ensure_schema_and_metadata_table agar sama dengan ExcelService
     async def _register_dataset_metadata(
         self,
         dataset_id: str,
@@ -224,8 +210,8 @@ class DynamicCsvService(DynamicExcelService):
         """Register dataset info ke tabel metadata"""
         schema_name = self.schema_name
         
-        # Pastikan skema dan tabel metadata ada
-        await self._ensure_schema_and_metadata_table()
+        # **Perubahan:** Panggilan ke await self._ensure_schema_and_metadata_table() telah dihapus 
+        # untuk menghilangkan redundansi dan menyelaraskan dengan struktur DynamicExcelService.
         
         column_names = list(df.columns)
         row_count = len(df)
@@ -241,7 +227,7 @@ class DynamicCsvService(DynamicExcelService):
         loop = asyncio.get_event_loop()
         await loop.run_in_executor(
             self.executor,
-            self._execute_sync_metadata_insert, # Menggunakan _execute_sync_metadata_insert yang diwarisi
+            self._execute_sync_metadata_insert, 
             insert_sql,
             {
                 "dataset_id": dataset_id,
@@ -257,8 +243,7 @@ class DynamicCsvService(DynamicExcelService):
         logger.info(f"Registered metadata for dataset {dataset_id}")
 
     
-    # ---------------------- Main CSV Processing ----------------------
-    # Dipertahankan, namun memanggil metode-metode yang sudah diwarisi/dioverride
+    # ---------------------- Main CSV Processing (Dipertahankan) ----------------------
     async def process_csv_dynamic_table(
         self,
         file_contents: bytes,
@@ -275,12 +260,13 @@ class DynamicCsvService(DynamicExcelService):
 
         dataset_id = uuid.uuid4()
         dataset_name = name or f"csv_{str(dataset_id)[:8]}"
-        table_name = self._sanitize_table_name(dataset_name) # Menggunakan metode yang diwarisi
+        table_name = self._sanitize_table_name(dataset_name)
 
         if create_table:
-            await self._create_dynamic_table(df, table_name, dataset_id) # Menggunakan metode yang dioverride
-            await self._insert_data_to_dynamic_table(df, table_name) 
+            await self._create_dynamic_table(df, table_name, dataset_id)
+            await self._insert_data_to_dynamic_table(df, table_name)
 
+        # Save metadata - reuse SchemeExcel but set sheet_name to "N/A" for CSV
         record = SchemeExcel(
             dataset_id=dataset_id,
             dataset_name=dataset_name,
