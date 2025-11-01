@@ -15,7 +15,7 @@ class QueryRequest(BaseModel):
     prompt: str = Field(..., min_length=1, max_length=10000)
     mode: QueryMode = QueryMode.AUTO
     use_cache: bool = True
-
+    querytype: str = Field(default="excel")
 
     @field_validator('prompt')
     @classmethod

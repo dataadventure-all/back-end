@@ -73,9 +73,11 @@ ALLOWED_CSV_EXTENSIONS = {'.csv', '.tsv'}
 ALLOWED_EXCEL_EXTENSIONS = {'.xlsx', '.xls'}
 
 # Singleton instance of QueryProcessor
-_query_processor_instance: Optional[QueryProcessor] = None
+# _query_processor_instance: Optional[QueryProcessor] = None
 
-async def get_query_processor(querytype, dataset_id) -> QueryProcessor:
+_query_processor_instance = None
+
+async def get_query_processor() -> QueryProcessor:
     """
     Get or create QueryProcessor instance (singleton pattern)
     """

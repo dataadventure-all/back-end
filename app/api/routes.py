@@ -39,35 +39,35 @@ async def health_check():
         timestamp=datetime.now()
     )
 
-@router.post(
-    "/query",
-    response_model=QueryResponse,
-    dependencies=[Depends(rate_limit)]
-)
-async def process_query(
-    request: QueryRequest,
-    background_tasks: BackgroundTasks,
-    processor: QueryProcessor = Depends(get_query_processor)
-):
-    """Process a natural language query"""
+# @router.post(
+#     "/query",
+#     response_model=QueryResponse,
+#     dependencies=[Depends(rate_limit)]
+# )
+# async def process_query(
+#     request: QueryRequest,
+#     background_tasks: BackgroundTasks,
+#     processor: QueryProcessor = Depends(get_query_processor)
+# ):
+#     """Process a natural language query"""
     
-    try:
-        logger.info(f"Processing query: {request.prompt[:100]}...")
+#     try:
+#         logger.info(f"Processing query: {request.prompt[:100]}...")
         
-        # Process query
-        response = await processor.process_query(request)
+#         # Process query
+#         response = await processor.process_query(request)
         
-        # Add background task for analytics/logging
-        background_tasks.add_task(log_query_analytics, request, response)
+#         # Add background task for analytics/logging
+#         background_tasks.add_task(log_query_analytics, request, response)
         
-        return response
+#         return response
         
-    except Exception as e:
-        logger.error(f"Query processing error: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(e)
-        )
+#     except Exception as e:
+#         logger.error(f"Query processing error: {str(e)}")
+#         raise HTTPException(
+#             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+#             detail=str(e)
+#         )
 
 
 @router.post("/upload/database", response_model=DatabaseTestResponse)

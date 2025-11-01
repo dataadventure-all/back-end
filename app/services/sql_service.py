@@ -44,19 +44,24 @@ class SQLService:
     async def _get_excel_schema(self, dataset_id: str) -> Dict[str, Any]:
         """Ambil schema info untuk dataset Excel"""
         async with get_raw_connection() as conn:
-            # 🔹 1. Ambil metadata dari tabel datasets_metadata
+            # ✅ 1. Fix: Gunakan parameterized query dengan $1
             meta_sql = """
                 SELECT schema_name, table_name
                 FROM schema_excel.datasets_metadata
-                WHERE dataset_id = 5f0c22cc-bf8b-4ff0-b5b8-693d9668fbb6
+                WHERE dataset_id = $1
                 LIMIT 1
             """
+            # ✅ Pass dataset_id sebagai parameter
             meta_row = await conn.fetchrow(meta_sql, dataset_id)
+            
             if not meta_row:
+                logger.error(f"Dataset ID {dataset_id} not found in metadata")
                 raise ValueError(f"Dataset ID {dataset_id} not found in metadata")
 
             schema_name = meta_row["schema_name"]
             table_name = meta_row["table_name"]
+            
+            logger.info(f"✅ Found metadata: schema={schema_name}, table={table_name}")
 
             # 🔹 2. Ambil kolom dari information_schema
             columns_sql = """
@@ -71,10 +76,13 @@ class SQLService:
                 ORDER BY c.ordinal_position
             """
             rows = await conn.fetch(columns_sql, schema_name, table_name)
+            
+            logger.info(f"✅ Found {len(rows)} columns for table {table_name}")
 
-            # 🔹 3. Format hasil
             return {
-                table_name: [
+                "schema": schema_name,
+                "table": table_name,
+                "columns": [
                     {
                         "column": r["column_name"],
                         "type": r["data_type"],
@@ -82,8 +90,9 @@ class SQLService:
                         "max_length": r["character_maximum_length"],
                     }
                     for r in rows
-                ]
+                ],
             }
+
 
 
     # ----------------------------------------

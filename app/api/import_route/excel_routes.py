@@ -114,24 +114,17 @@ async def upload_excel_dynamic_table(
 async def process_query(
     request: QueryRequest,
     background_tasks: BackgroundTasks,
-    processor: QueryProcessor = Depends(get_query_processor),
-    dataset_id: Optional[str] = Header(None, alias="X-Dataset-ID")
+    dataset_id: str = Header(..., alias="X-Dataset-ID"),
+    processor: QueryProcessor = Depends(get_query_processor)
 ):
     """Process a natural language query"""
     
     try:
-        logger.info(f"Processing query: {request.prompt[:100]}...")
-
-        if not dataset_id:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Missing X-Dataset-ID header"
-            )
+        logger.info(f"Processing query: {request.prompt[:100]}... for dataset: {dataset_id}")
         
-        # Process query
+        # ✅ Sekarang querytype sudah ada di request
         response = await processor.process_query(request, dataset_id=dataset_id)
         
-        # Add background task for analytics/logging
         background_tasks.add_task(log_query_analytics, request, response)
         
         return response
@@ -146,3 +139,15 @@ async def process_query(
 async def log_query_analytics(request: QueryRequest, response: QueryResponse):
     """Background task to log analytics"""
     logger.info(f"Query completed: {response.query_id} - Success: {response.success}")
+
+@router.post("/test-query")
+async def test_query(
+    request: QueryRequest,
+    dataset_id: str = Header(..., alias="X-Dataset-ID")
+):
+    return {
+        "prompt": request.prompt,
+        "mode": request.mode,
+        "use_cache": request.use_cache,
+        "dataset_id": dataset_id
+    }

@@ -39,12 +39,7 @@ class QueryProcessor:
             else:
                 logger.warning("Redis not connected at initialization")
             
-            # Pre-load database schema
-            self.schema_cache = await self.sql_service.get_schema_info()
-            if await self.redis_service.is_connected():
-                await self.redis_service.set_cache("db_schema", self.schema_cache, expire_seconds=3600)
-                logger.info("Database schema cached at initialization")
-            
+            # Pre-load database scheme
             self.initialized = True
             logger.info("QueryProcessor initialized successfully")
         
@@ -190,7 +185,7 @@ class QueryProcessor:
             
         except Exception as e:
             logger.error(f"Schema caching failed: {e}")
-            return await self.sql_service.get_schema_info(querytype)
+            return await self.sql_service.get_schema_info(querytype, dataset_id)
     
     # ---------------- Utility Methods ----------------
     def _generate_query_hash(self, request: QueryRequest) -> str:
