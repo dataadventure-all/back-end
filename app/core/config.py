@@ -50,7 +50,7 @@ class Settings(BaseSettings):
     API_KEY: Optional[str] = None
     
     # CORS
-    CORS_ORIGINS: List[str] = ["http://localhost:3001"]
+    CORS_ORIGINS: List[str] = ["http://localhost:5173"]
     
     # Rate Limiting
     RATE_LIMIT_ENABLED: bool = True

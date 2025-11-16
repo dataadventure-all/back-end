@@ -17,6 +17,9 @@ from ...core.config import get_settings
 from ...models.schemas import SchemeExcel
 from ...utils.logger import get_logger
 from ...utils.exceptions import InvalidFileFormatError
+import time
+from ...core.database import get_raw_connection
+from ...services.llm_service import LLMService
 
 logger = get_logger(__name__)
 
@@ -28,6 +31,7 @@ class DynamicExcelService:
         self.max_rows = 100_000
         self.executor = ThreadPoolExecutor(max_workers=1)
         self.settings = get_settings()
+        self.llm_service = LLMService()
 
     # ---------------------- Sanitization ----------------------
     def _sanitize_table_name(self, name: str) -> str:
@@ -290,22 +294,137 @@ class DynamicExcelService:
             }
         }
 
-    # ---------------------- Query Dynamic Table ----------------------
-    async def query_dynamic_table(self, dataset_id: str, query: str) -> Dict[str, Any]:
-        async with AsyncSessionLocal() as session:
-            result = await session.execute(select(SchemeExcel).where(SchemeExcel.dataset_id == dataset_id))
-            record = result.scalar_one_or_none()
-            if not record or not record.full_data.get("dynamic_table"):
-                return {"success": False, "error": "Dataset not found or no dynamic table created"}
-            table_name = record.full_data["dynamic_table"]
 
-            result = await session.execute(text(query))
-            rows = result.fetchall()
-            columns = list(result.keys())
-            data = [dict(zip(columns, row)) for row in rows]
-
-            return {"success": True, "data": data, "columns": columns, "row_count": len(data), "table_name": table_name}
-
+    async def query_dynamic_table(
+            self, 
+            sql_query: str,
+            dataset_id: str,
+            generate_chart: bool = False,
+            chart_prompt: Optional[str] = None,
+            chart_type: Optional[str] = None,
+            color_scheme: Optional[str] = None,
+            chart_width: int = 800,
+            chart_height: int = 400
+        ) -> Dict[str, Any]:
+        """
+        Execute SQL query on dynamic table in schema_excel
+        
+        Args:
+            sql_query: SQL query to execute
+            dataset_id: Dataset identifier
+            generate_chart: Whether to generate chart configuration
+            chart_prompt: Natural language description for chart (e.g., "show sales trend over time")
+            chart_type: Preferred chart type (optional: "line", "bar", "pie", etc.)
+            color_scheme: Color scheme (optional: "blue", "green", "purple", etc.)
+            chart_width: Chart width in pixels
+            chart_height: Chart height in pixels
+        
+        Returns:
+            Dict containing query results and optional chart configuration
+        """
+        
+        start_time = time.time()
+        
+        try:
+            async with get_raw_connection() as conn:
+                # ✅ 1. Get table metadata from schema_excel.datasets_metadata
+                meta_sql = """
+                    SELECT schema_name, table_name
+                    FROM schema_excel.datasets_metadata
+                    WHERE dataset_id = $1
+                    LIMIT 1
+                """
+                meta_row = await conn.fetchrow(meta_sql, dataset_id)
+                
+                if not meta_row:
+                    return {
+                        "success": False, 
+                        "error": f"Dataset {dataset_id} not found in metadata",
+                        "data": [],
+                        "row_count": 0,
+                        "execution_time_seconds": 0,
+                        "columns": [],
+                        "chart_config": None
+                    }
+                
+                schema_name = meta_row["schema_name"]  # "schema_excel"
+                table_name = meta_row["table_name"]    # "excel_data_abc123"
+                
+                # ✅ 2. Replace {{table}} placeholder with fully qualified name
+                fully_qualified_table = f"{schema_name}.{table_name}"
+                final_query = sql_query.replace("{{table}}", fully_qualified_table)
+                
+                logger.info(f"Executing query on: {fully_qualified_table}")
+                logger.info(f"Final query: {final_query}")
+                
+                # ✅ 3. Execute query
+                rows = await conn.fetch(final_query)
+                
+                if rows:
+                    columns = list(rows[0].keys())
+                    data = [dict(row) for row in rows]
+                else:
+                    columns = []
+                    data = []
+                
+                execution_time = time.time() - start_time
+                
+                # ✅ 4. Generate chart configuration if requested
+                chart_config = None
+                if generate_chart and data:
+                    try:
+                        # Use the first 5 rows for chart generation (or all if less than 5)
+                        sample_data = data[:5] if len(data) > 5 else data
+                        
+                        # Create default chart prompt if not provided
+                        if not chart_prompt:
+                            chart_prompt = f"Visualize the data with columns: {', '.join(columns)}"
+                        
+                        # Generate chart configuration using LLM
+                        chart_config = await self.llm_service.generate_chart_config(
+                            data=data,  # Pass full data for analysis
+                            user_prompt=chart_prompt,
+                            preferred_chart_type=chart_type,
+                            color_scheme=color_scheme,
+                            width=chart_width,
+                            height=chart_height
+                        )
+                        
+                        logger.info(f"Chart config generated: {chart_config.get('chart_type', 'unknown')} chart")
+                        
+                    except Exception as chart_error:
+                        logger.error(f"Chart generation failed: {str(chart_error)}")
+                        # Create fallback chart config
+                        chart_config = self._create_fallback_config(
+                            data=data,
+                            user_prompt=chart_prompt or "Data visualization",
+                            color_scheme=color_scheme,
+                            width=chart_width,
+                            height=chart_height
+                        )
+                
+                return {
+                    "success": True,
+                    "data": data,
+                    "columns": columns,
+                    "row_count": len(data),
+                    "schema_name": schema_name,
+                    "table_name": table_name,
+                    "execution_time_seconds": round(execution_time, 3),
+                    "chart_config": chart_config  # ✅ Added chart configuration
+                }
+                
+        except Exception as e:
+            logger.error(f"Query execution error: {str(e)}", exc_info=True)
+            return {
+                "success": False,
+                "error": str(e),
+                "data": [],
+                "row_count": 0,
+                "execution_time_seconds": time.time() - start_time,
+                "columns": [],
+                "chart_config": None
+            }
     # ---------------------- Drop Dynamic Table ----------------------
     async def drop_dynamic_table(self, dataset_id: str) -> bool:
         async with AsyncSessionLocal() as session:

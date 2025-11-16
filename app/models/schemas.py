@@ -341,3 +341,105 @@ class SchemeExcel(Base):
     # Timestamps
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+
+# models/schemas.py
+
+class QueryExecutionRequest(BaseModel):
+    """Request model for query execution"""
+    query_id: str = Field(..., description="Unique query identifier")
+    sql_query: str = Field(..., description="SQL query to execute")
+    
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "query_id": "query_123",
+                "sql_query": "SELECT * FROM {{table}} LIMIT 10"
+            }
+        }
+
+
+class ChartConfig(BaseModel):
+    """Chart configuration model"""
+    chart_type: str = Field(..., description="Type of chart (line, bar, pie, etc.)")
+    x_axis: str = Field(..., description="Column for x-axis")
+    y_axis: str = Field(..., description="Column for y-axis")
+    title: str = Field(..., description="Chart title")
+    colors: List[str] = Field(..., description="Array of color codes")
+    color_scheme: str = Field(..., description="Color scheme name")
+    width: int = Field(..., description="Chart width in pixels")
+    height: int = Field(..., description="Chart height in pixels")
+    show_legend: bool = Field(True, description="Show legend")
+    show_grid: bool = Field(True, description="Show grid")
+    show_tooltip: bool = Field(True, description="Show tooltip")
+    animate: bool = Field(True, description="Enable animations")
+    aggregate_function: Optional[str] = Field(None, description="Aggregation function if needed")
+    group_by: Optional[str] = Field(None, description="Column to group by")
+    additional_config: Dict[str, Any] = Field(default_factory=dict, description="Chart-specific settings")
+    
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "chart_type": "line",
+                "x_axis": "month",
+                "y_axis": "sales",
+                "title": "Monthly Sales Trend",
+                "colors": ["#8884d8", "#82ca9d"],
+                "color_scheme": "blue",
+                "width": 800,
+                "height": 400,
+                "show_legend": True,
+                "show_grid": True,
+                "show_tooltip": True,
+                "animate": True,
+                "aggregate_function": None,
+                "group_by": None,
+                "additional_config": {
+                    "smooth_curve": True,
+                    "show_dots": True
+                }
+            }
+        }
+
+
+class QueryExecutionResponse(BaseModel):
+    """Response model for query execution"""
+    query_id: str = Field(..., description="Query identifier")
+    success: bool = Field(..., description="Execution success status")
+    data: List[Dict[str, Any]] = Field(..., description="Query result data")
+    row_count: int = Field(..., description="Number of rows returned")
+    execution_time_seconds: float = Field(..., description="Query execution time")
+    columns: List[str] = Field(..., description="Column names")
+    chart_config: Optional[ChartConfig] = Field(None, description="Chart configuration if requested")
+    
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "query_id": "query_123",
+                "success": True,
+                "data": [
+                    {"month": "Jan", "sales": 1000},
+                    {"month": "Feb", "sales": 1500}
+                ],
+                "row_count": 2,
+                "execution_time_seconds": 0.234,
+                "columns": ["month", "sales"],
+                "chart_config": {
+                    "chart_type": "line",
+                    "x_axis": "month",
+                    "y_axis": "sales",
+                    "title": "Monthly Sales Trend",
+                    "colors": ["#8884d8"],
+                    "color_scheme": "blue",
+                    "width": 800,
+                    "height": 400,
+                    "show_legend": True,
+                    "show_grid": True,
+                    "show_tooltip": True,
+                    "animate": True,
+                    "aggregate_function": None,
+                    "group_by": None,
+                    "additional_config": {}
+                }
+            }
+        }
